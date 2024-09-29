@@ -1,0 +1,216 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "CloudFormation Template to trigger a Lambda function on S3 file upload.",
+    "Parameters": {
+        "BucketName": {
+            "Type": "String",
+            "Description": "Name of the S3 bucket where files will be uploaded.",
+            "Default" : "codewithakshay-s3-event"
+        },
+        "LambdaFunctionName": {
+            "Type": "String",
+            "Default": "S3FileUploadHandler",
+            "Description": "Name of the Lambda function to handle S3 uploads."
+        },
+        "LambdaRuntime": {
+            "Type": "String",
+            "Default": "nodejs18.x",
+            "AllowedValues": [
+                "nodejs18.x",
+                "nodejs20.x"
+            ],
+            "Description": "Runtime environment for the Lambda function."
+        },
+        "LambdaHandler": {
+            "Type": "String",
+            "Default": "index.handler",
+            "Description": "Handler for the Lambda function."
+        },
+        "LambdaMemorySize": {
+            "Type": "Number",
+            "Default": 128,
+            "Description": "Amount of memory available to the Lambda function (MB)."
+        },
+        "LambdaTimeout": {
+            "Type": "Number",
+            "Default": 30,
+            "Description": "Maximum execution time for the Lambda function (seconds)."
+        },
+        "LambdaS3Bucket": {
+            "Type": "String",
+            "Description": "S3 bucket where the Lambda function code is stored.",
+            "Default": "codewithakshay-git"
+        },
+        "LambdaS3Key": {
+            "Type": "String",
+            "Description": "S3 key for the Lambda function code zip file.",
+            "Default": "cf-aws_s3event_to_lambda/codeapp.zip"
+        }
+    },
+    "Resources": {
+        "LambdaInvokePermissionToS3Bucket": {
+            "Type": "AWS::Lambda::Permission",
+            "Properties": {
+                "FunctionName": {
+                    "Ref": "LambdaFunction"
+                },
+                "Action": "lambda:InvokeFunction",
+                "Principal": "s3.amazonaws.com",
+                "SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                }
+            }
+        },
+        "S3Bucket": {
+            "DependsOn" : "LambdaInvokePermissionToS3Bucket",
+            "Type": "AWS::S3::Bucket",
+            "Properties": {
+                "BucketName": {
+                    "Ref": "BucketName"
+                },
+                "NotificationConfiguration": {
+                    "LambdaConfigurations": [
+                        {
+                            "Event": "s3:ObjectCreated:*",
+                            "Function": {
+                                "Fn::GetAtt": [
+                                    "LambdaFunction",
+                                    "Arn"
+                                ]
+                            },
+                            "Filter" : {
+                                "S3Key" : {
+                                    "Rules" : [
+                                        {
+                                            "Name": "prefix",
+                                            "Value": "images/"
+                                        },
+                                        {
+                                            "Name": "suffix",
+                                            "Value": ".jpg"
+                                        }
+                                    ]
+                                }
+                              }
+                        }
+                    ]
+                },
+                "VersioningConfiguration": {
+                    "Status": "Enabled"
+                }
+            }
+        },
+        "LambdaExecutionRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "RoleName": {
+                    "Fn::Sub": "${LambdaFunctionName}-ExecutionRole"
+                },
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "lambda.amazonaws.com"
+                            },
+                            "Action": "sts:AssumeRole"
+                        }
+                    ]
+                },
+                "Policies": [
+                    {
+                        "PolicyName": "LambdaS3ExecutionPolicy",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "logs:CreateLogGroup",
+                                        "logs:CreateLogStream",
+                                        "logs:PutLogEvents"
+                                    ],
+                                    "Resource": "arn:aws:logs:*:*:*"
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "s3:*"
+                                    ],
+                                    "Resource": {
+                                        "Fn::Join": [
+                                            "",
+                                            [
+                                                "arn:aws:s3:::",
+                                                {
+                                                    "Ref": "BucketName"
+                                                },
+                                                "/*"
+                                            ]
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "LambdaFunction": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "FunctionName": {
+                    "Ref": "LambdaFunctionName"
+                },
+                "Runtime": {
+                    "Ref": "LambdaRuntime"
+                },
+                "Handler": {
+                    "Ref": "LambdaHandler"
+                },
+                "Role": {
+                    "Fn::GetAtt": [
+                        "LambdaExecutionRole",
+                        "Arn"
+                    ]
+                },
+                "Code": {
+                    "S3Bucket": {
+                        "Ref": "LambdaS3Bucket"
+                    },
+                    "S3Key": {
+                        "Ref": "LambdaS3Key"
+                    }
+                },
+                "MemorySize": {
+                    "Ref": "LambdaMemorySize"
+                },
+                "Timeout": {
+                    "Ref": "LambdaTimeout"
+                },
+                "Environment": {
+                    "Variables": {
+                        "BUCKET_NAME": {
+                            "Ref": "BucketName"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "Outputs": {
+        "S3BucketName": {
+            "Description": "Name of the S3 bucket",
+            "Value": {
+                "Ref": "S3Bucket"
+            }
+        },
+        "LambdaFunctionName": {
+            "Description": "Name of the Lambda function",
+            "Value": {
+                "Ref": "LambdaFunction"
+            }
+        }
+    }
+}
